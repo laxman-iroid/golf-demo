@@ -34,6 +34,11 @@ class GoogleMapsViewController: UIViewController {
     private var previousHoleButton: UIButton!
     private var nextHoleButton: UIButton!
 
+    // Rotation controls
+    private var rotateLeftButton: UIButton!
+    private var rotateRightButton: UIButton!
+    private var resetNorthButton: UIButton!
+
 
     // MARK: - Lifecycle
     override func viewDidLoad() {
@@ -43,6 +48,7 @@ class GoogleMapsViewController: UIViewController {
         setupMapView()
         setupDistanceLabels()
         setupHoleNavigationUI()
+       // setupRotationControls()
 
         // Use selected course if available, otherwise use default
         if let course = selectedCourse {
@@ -270,13 +276,13 @@ class GoogleMapsViewController: UIViewController {
     private func setupMarkers() {
         // Player 1 marker (Red)
         player1Marker = GMSMarker(position: player1Point)
-        player1Marker?.title = "Player 1"
+        player1Marker?.title = "Tee Box"
         player1Marker?.icon = GMSMarker.markerImage(with: .systemRed)
         player1Marker?.map = mapView
 
         // Player 2 marker (Green)
         player2Marker = GMSMarker(position: player2Point)
-        player2Marker?.title = "Player 2"
+        player2Marker?.title = "Green"
         player2Marker?.icon = GMSMarker.markerImage(with: .systemGreen)
         player2Marker?.map = mapView
 
@@ -357,8 +363,138 @@ class GoogleMapsViewController: UIViewController {
         let bounds = GMSCoordinateBounds(coordinate: player1Point, coordinate: player2Point)
             .includingCoordinate(midPoint)
 
-        let update = GMSCameraUpdate.fit(bounds, withPadding: 100)
-        mapView.animate(with: update)
+        // Calculate bearing from Player 1 (tee) to Player 2 (green)
+        let bearing = calculateBearing(from: player1Point, to: player2Point)
+
+        // Create camera with calculated bearing for auto-rotation
+        let center = CLLocationCoordinate2D(
+            latitude: (player1Point.latitude + player2Point.latitude) / 2,
+            longitude: (player1Point.longitude + player2Point.longitude) / 2
+        )
+
+        let camera = GMSCameraPosition(
+            target: center,
+            zoom: 17,
+            bearing: bearing,
+            viewingAngle: 0
+        )
+
+        mapView.animate(to: camera)
+    }
+    
+
+    private func calculateBearing(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D) -> Double {
+        let lat1 = start.latitude * .pi / 180
+        let lat2 = end.latitude * .pi / 180
+        let lon1 = start.longitude * .pi / 180
+        let lon2 = end.longitude * .pi / 180
+
+        let dLon = lon2 - lon1
+
+        let y = sin(dLon) * cos(lat2)
+        let x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dLon)
+
+        var bearing = atan2(y, x) * 180 / .pi
+        bearing = (bearing + 360).truncatingRemainder(dividingBy: 360)
+
+        return bearing
+    }
+
+    // MARK: - Rotation Controls
+
+//    private func setupRotationControls() {
+//        // Rotate Left button
+//        rotateLeftButton = UIButton(type: .system)
+//        rotateLeftButton.setTitle("↶", for: .normal)
+//        rotateLeftButton.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+//        rotateLeftButton.backgroundColor = UIColor.systemIndigo.withAlphaComponent(0.9)
+//        rotateLeftButton.setTitleColor(.white, for: .normal)
+//        rotateLeftButton.layer.cornerRadius = 25
+//        rotateLeftButton.translatesAutoresizingMaskIntoConstraints = false
+//        rotateLeftButton.addTarget(self, action: #selector(rotateLeftTapped), for: .touchUpInside)
+//
+//        view.addSubview(rotateLeftButton)
+//
+//        // Rotate Right button
+//        rotateRightButton = UIButton(type: .system)
+//        rotateRightButton.setTitle("↷", for: .normal)
+//        rotateRightButton.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
+//        rotateRightButton.backgroundColor = UIColor.systemIndigo.withAlphaComponent(0.9)
+//        rotateRightButton.setTitleColor(.white, for: .normal)
+//        rotateRightButton.layer.cornerRadius = 25
+//        rotateRightButton.translatesAutoresizingMaskIntoConstraints = false
+//        rotateRightButton.addTarget(self, action: #selector(rotateRightTapped), for: .touchUpInside)
+//
+//        view.addSubview(rotateRightButton)
+//
+//        // Reset North button
+//        resetNorthButton = UIButton(type: .system)
+//        resetNorthButton.setTitle("N", for: .normal)
+//        resetNorthButton.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .bold)
+//        resetNorthButton.backgroundColor = UIColor.systemIndigo.withAlphaComponent(0.9)
+//        resetNorthButton.setTitleColor(.white, for: .normal)
+//        resetNorthButton.layer.cornerRadius = 25
+//        resetNorthButton.translatesAutoresizingMaskIntoConstraints = false
+//        resetNorthButton.addTarget(self, action: #selector(resetNorthTapped), for: .touchUpInside)
+//
+//        view.addSubview(resetNorthButton)
+//
+//        NSLayoutConstraint.activate([
+//            // Rotate Left button (left side, middle)
+//            rotateLeftButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+//            rotateLeftButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+//            rotateLeftButton.widthAnchor.constraint(equalToConstant: 50),
+//            rotateLeftButton.heightAnchor.constraint(equalToConstant: 50),
+//
+//            // Rotate Right button (right side, middle)
+//            rotateRightButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+//            rotateRightButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+//            rotateRightButton.widthAnchor.constraint(equalToConstant: 50),
+//            rotateRightButton.heightAnchor.constraint(equalToConstant: 50),
+//
+//            // Reset North button (center bottom, above navigation buttons)
+//            resetNorthButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+//            resetNorthButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+//            resetNorthButton.widthAnchor.constraint(equalToConstant: 50),
+//            resetNorthButton.heightAnchor.constraint(equalToConstant: 50)
+//        ])
+//    }
+//
+//    @objc private func rotateLeftTapped() {
+//        rotateMap(by: -45) // Rotate 45° counter-clockwise
+//    }
+//
+//    @objc private func rotateRightTapped() {
+//        rotateMap(by: 45) // Rotate 45° clockwise
+//    }
+//
+//    @objc private func resetNorthTapped() {
+//        resetMapToNorth() // Reset to 0° (North)
+//    }
+
+    private func rotateMap(by degrees: Double) {
+        let currentBearing = mapView.camera.bearing
+        let newBearing = currentBearing + degrees
+
+        let camera = GMSCameraPosition(
+            target: mapView.camera.target,
+            zoom: mapView.camera.zoom,
+            bearing: newBearing,
+            viewingAngle: mapView.camera.viewingAngle
+        )
+
+        mapView.animate(to: camera)
+    }
+
+    private func resetMapToNorth() {
+        let camera = GMSCameraPosition(
+            target: mapView.camera.target,
+            zoom: mapView.camera.zoom,
+            bearing: 0, // North
+            viewingAngle: mapView.camera.viewingAngle
+        )
+
+        mapView.animate(to: camera)
     }
 
 }
