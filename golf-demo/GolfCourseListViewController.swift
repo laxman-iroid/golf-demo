@@ -262,7 +262,11 @@ extension GolfCourseListViewController: UITableViewDelegate {
         let selectedCourse = filteredCourses[indexPath.row]
 
         // Navigate to Google Maps course detail view
-        let googleMapsVC = GoogleMapsViewController()
+        let storyboard = UIStoryboard(name: "Main", bundle: nil)
+        guard let googleMapsVC = storyboard.instantiateViewController(withIdentifier: "GoogleMapsViewController") as? GoogleMapsViewController else {
+            print("❌ Failed to instantiate GoogleMapsViewController from storyboard")
+            return
+        }
         googleMapsVC.selectedCourse = selectedCourse
 //        googleMapsVC.selectedHoleNumber = 18  // Default to Hole 18
         googleMapsVC.title = "\(selectedCourse.courseName) - Hole 18"

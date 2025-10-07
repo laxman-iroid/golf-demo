@@ -118,3 +118,29 @@ extension LatLng {
         return location1.yardsBetween(location2)
     }
 }
+
+// MARK: - Golf Course Feature Models
+
+struct GolfCourseFeature {
+    let title: String
+    let number: String
+}
+
+class GolfCourseFeatureData {
+    static func getHoleFeatures() -> [GolfCourseFeature] {
+        return [
+            GolfCourseFeature(title: "Green", number: "1"),
+            GolfCourseFeature(title: "Green Bunker", number: "2"),
+            GolfCourseFeature(title: "Fairway Bunker", number: "3"),
+            GolfCourseFeature(title: "Water", number: "4"),
+            GolfCourseFeature(title: "Trees", number: "5"),
+            GolfCourseFeature(title: "100 Marker", number: "6"),
+            GolfCourseFeature(title: "150 Marker", number: "7"),
+            GolfCourseFeature(title: "200 Marker", number: "8"),
+            GolfCourseFeature(title: "Dogleg", number: "9"),
+            GolfCourseFeature(title: "Road", number: "10"),
+            GolfCourseFeature(title: "Front Tee", number: "11"),
+            GolfCourseFeature(title: "Back Tee", number: "12")
+        ]
+    }
+}

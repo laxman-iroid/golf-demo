@@ -4,12 +4,19 @@ import CoreLocation
 
 class GoogleMapsViewController: UIViewController {
 
+    @IBOutlet weak var mainMapView: UIView!
+    @IBOutlet weak var tableViewBackegroundView: UIView!
+    @IBOutlet weak var infoTableView: UITableView!
+    
     // MARK: - Properties
     var selectedCourse: GolfCourse?
     var selectedHoleNumber: Int = 1  // Default to hole 18
+    private var golfFeatures: [GolfCourseFeature] = []
 
     private var mapView: GMSMapView!
     private var locationManager = CLLocationManager()
+    private var lastLocationUpdateTime: Date?
+    private let locationUpdateInterval: TimeInterval = 5.0 // Update every 5 seconds
 
     // Three points for the polyline
     private var player1Point: CLLocationCoordinate2D!  // Red player
@@ -20,6 +27,9 @@ class GoogleMapsViewController: UIViewController {
     private var player1Marker: GMSMarker?
     private var player2Marker: GMSMarker?
     private var midMarker: GMSMarker?
+    
+    // User location markers
+    private var userMarkers: [String: GMSMarker] = [:]  // Dictionary to store user markers by userId
 
     // Polyline segments
     private var polylinePlayer1ToMid: GMSPolyline?
@@ -28,17 +38,17 @@ class GoogleMapsViewController: UIViewController {
     // Distance labels
     private var player1DistanceLabel: UILabel!
     private var player2DistanceLabel: UILabel!
+    private var zoomLevelLabel: UILabel!
 
     // Hole navigation
     private var holeInfoLabel: UILabel!
-    private var previousHoleButton: UIButton!
-    private var nextHoleButton: UIButton!
+//    private var previousHoleButton: UIButton!
+//    private var nextHoleButton: UIButton!
 
     // Rotation controls
     private var rotateLeftButton: UIButton!
     private var rotateRightButton: UIButton!
     private var resetNorthButton: UIButton!
-
 
     // MARK: - Lifecycle
     override func viewDidLoad() {
@@ -47,21 +57,221 @@ class GoogleMapsViewController: UIViewController {
         setupLocationManager()
         setupMapView()
         setupDistanceLabels()
+        setupZoomLevelLabel()
         setupHoleNavigationUI()
        // setupRotationControls()
 
         // Use selected course if available, otherwise use default
         if let course = selectedCourse {
-            initializePointsFromCourse(course)
+//            initializePointsFromCourse(course)
+            initializeDefaultPoints()
         } else {
             initializeDefaultPoints()
         }
-
+        setupCell()
+        setupTableViewGradient()
+        loadGolfFeatures()
         setupMarkers()
         drawPolylines()
         updateDistanceLabels()
         updateHoleInfo()
         centerMapOnHole()
+        setupSocket()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        navigationController?.setNavigationBarHidden(true, animated: animated)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        navigationController?.setNavigationBarHidden(false, animated: animated)
+        disconnectSocket()
+    }
+
+    func setupCell(){
+        self.infoTableView.dataSource = self
+        self.infoTableView.delegate = self
+        self.infoTableView.register(UINib(nibName: "InfoTableViewCell", bundle: nil), forCellReuseIdentifier: "InfoTableViewCell")
+    }
+    
+    private func setupTableViewGradient() {
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.frame = tableViewBackegroundView.bounds
+        
+        // Create a horizontal gradient with intense white glow growing from the right side
+        gradientLayer.colors = [
+            UIColor.white.cgColor,
+            UIColor.white.withAlphaComponent(0.7).cgColor,
+            UIColor.white.withAlphaComponent(0.7).cgColor,
+            UIColor.white.withAlphaComponent(0.1).cgColor
+        ]
+        
+        // Set gradient direction (horizontal - left to right)
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0.5)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 0.5)
+        
+        // Position the gradient colors to create a more intense glow effect from the right
+        gradientLayer.locations = [0.0, 0.5, 0.8, 1.0]
+        
+        // Add the gradient layer to the background view
+        tableViewBackegroundView.layer.insertSublayer(gradientLayer, at: 0)
+        
+        // Store reference for later frame updates
+        tableViewBackegroundView.layer.setValue(gradientLayer, forKey: "gradientLayer")
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        
+        // Update gradient frame when view layout changes
+        if let gradientLayer = tableViewBackegroundView.layer.value(forKey: "gradientLayer") as? CAGradientLayer {
+            gradientLayer.frame = tableViewBackegroundView.bounds
+        }
+    }
+    
+    private func loadGolfFeatures() {
+        golfFeatures = GolfCourseFeatureData.getHoleFeatures()
+        infoTableView.reloadData()
+    }
+    
+    // MARK: - Socket Setup
+    private func setupSocket() {
+        SocketHelper.shared.connectSocket { [weak self] success in
+            if success {
+                print("✅ Socket connected successfully")
+                self?.setupLocationListener()
+            } else {
+                print("❌ Failed to connect socket")
+            }
+        }
+    }
+    
+    private func setupLocationListener() {
+        // Listen for other users' location updates
+        SocketHelper.Events.updateUserLocation.listen { [weak self] response in
+            print("📍 Received location update from other user: \(response)")
+            
+            if let locationData = response as? [String: Any],
+               let latitude = locationData["latitude"] as? Double,
+               let longitude = locationData["longitude"] as? Double,
+               let userId = locationData["userId"] as? String {
+                
+                DispatchQueue.main.async {
+                    self?.handleOtherUserLocationUpdate(userId: userId, latitude: latitude, longitude: longitude)
+                }
+            }
+        }
+    }
+    
+    private func handleOtherUserLocationUpdate(userId: String, latitude: Double, longitude: Double) {
+        print("🔄 Updating other user location - ID: \(userId), Lat: \(latitude), Lng: \(longitude)")
+        
+        // Don't show marker for current user
+        if userId == String(Utility.getUserData()?.id ?? 0) {
+            return
+        }
+        
+        let userLocation = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        
+        // Check if marker already exists for this user
+        if let existingMarker = userMarkers[userId] {
+            // Update existing marker position
+            existingMarker.position = userLocation
+            print("📍 Updated existing marker for user: \(userId)")
+        } else {
+            // Create new marker for this user
+            let userMarker = GMSMarker(position: userLocation)
+            userMarker.title = "User: \(userId)"
+            userMarker.snippet = "Online User"
+            userMarker.icon = createUserMarkerIcon()
+            userMarker.map = mapView
+            
+            // Store the marker in dictionary
+            userMarkers[userId] = userMarker
+            print("✅ Created new marker for user: \(userId)")
+        }
+    }
+    
+    private func createUserMarkerIcon() -> UIImage? {
+        let size = CGSize(width: 40, height: 40)
+        
+        UIGraphicsBeginImageContextWithOptions(size, false, 0)
+        guard let context = UIGraphicsGetCurrentContext() else { return nil }
+        
+        // Draw orange circle for other users
+        let circleRect = CGRect(x: 5, y: 5, width: 30, height: 30)
+        context.setFillColor(UIColor.systemOrange.cgColor)
+        context.setStrokeColor(UIColor.white.cgColor)
+        context.setLineWidth(3)
+        context.addEllipse(in: circleRect)
+        context.drawPath(using: .fillStroke)
+        
+        // Add user icon in the center
+        let iconSize: CGFloat = 16
+        let iconRect = CGRect(
+            x: (size.width - iconSize) / 2,
+            y: (size.height - iconSize) / 2,
+            width: iconSize,
+            height: iconSize
+        )
+        
+        // Draw simple user icon (person symbol)
+        context.setFillColor(UIColor.white.cgColor)
+        let headRect = CGRect(x: iconRect.midX - 3, y: iconRect.minY + 2, width: 6, height: 6)
+        context.addEllipse(in: headRect)
+        context.fillPath()
+        
+        let bodyRect = CGRect(x: iconRect.midX - 4, y: iconRect.minY + 8, width: 8, height: 6)
+        context.addEllipse(in: bodyRect)
+        context.fillPath()
+        
+        let image = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        return image
+    }
+    
+    private func removeUserMarker(userId: String) {
+        if let marker = userMarkers[userId] {
+            marker.map = nil
+            userMarkers.removeValue(forKey: userId)
+            print("🗑️ Removed marker for user: \(userId)")
+        }
+    }
+    
+    private func clearAllUserMarkers() {
+        for (userId, marker) in userMarkers {
+            marker.map = nil
+        }
+        userMarkers.removeAll()
+        print("🧹 Cleared all user markers")
+    }
+    
+    private func emitUserLocationUpdate(latitude: Double, longitude: Double) {
+        guard SocketHelper.shared.checkConnection() else {
+            print("❌ Socket not connected, cannot emit location")
+            return
+        }
+        
+        let locationData: [String: Any] = [
+            "userId": String(Utility.getUserData()?.id ?? 0),
+            "latitude": latitude,
+            "longitude": longitude,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+        
+        SocketHelper.Events.updateUserLocation.emit(params: locationData) {
+            print("📡 Location update emitted successfully")
+        }
+    }
+    
+    private func disconnectSocket() {
+        SocketHelper.Events.updateUserLocation.off()
+        SocketHelper.shared.disconnectSocket()
+        clearAllUserMarkers()
+        print("🔌 Socket disconnected")
     }
 
     // MARK: - Setup Methods
@@ -79,7 +289,7 @@ class GoogleMapsViewController: UIViewController {
         let camera = GMSCameraPosition(latitude: initialLat, longitude: initialLng, zoom: 17)
         let options = GMSMapViewOptions()
         options.camera = camera
-        options.frame = view.bounds
+        options.frame = mainMapView.bounds
         mapView = GMSMapView(options: options)
         mapView.mapType = .satellite
         mapView.isMyLocationEnabled = true
@@ -90,8 +300,17 @@ class GoogleMapsViewController: UIViewController {
         mapView.settings.rotateGestures = true
         mapView.settings.tiltGestures = true
         mapView.delegate = self
+        mapView.translatesAutoresizingMaskIntoConstraints = false
 
-        view.addSubview(mapView)
+        mainMapView.addSubview(mapView)
+
+        // Add constraints to fill mainMapView
+        NSLayoutConstraint.activate([
+            mapView.leadingAnchor.constraint(equalTo: mainMapView.leadingAnchor),
+            mapView.trailingAnchor.constraint(equalTo: mainMapView.trailingAnchor),
+            mapView.topAnchor.constraint(equalTo: mainMapView.topAnchor),
+            mapView.bottomAnchor.constraint(equalTo: mainMapView.bottomAnchor)
+        ])
     }
 
     private func setupDistanceLabels() {
@@ -134,6 +353,33 @@ class GoogleMapsViewController: UIViewController {
         ])
     }
 
+    private func setupZoomLevelLabel() {
+        zoomLevelLabel = UILabel()
+        zoomLevelLabel.backgroundColor = UIColor.black.withAlphaComponent(0.8)
+        zoomLevelLabel.textColor = .white
+        zoomLevelLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        zoomLevelLabel.textAlignment = .center
+        zoomLevelLabel.layer.cornerRadius = 8
+        zoomLevelLabel.clipsToBounds = true
+        zoomLevelLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(zoomLevelLabel)
+
+        NSLayoutConstraint.activate([
+            zoomLevelLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            zoomLevelLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
+            zoomLevelLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
+            zoomLevelLabel.heightAnchor.constraint(equalToConstant: 40)
+        ])
+
+        updateZoomLabel()
+    }
+
+    private func updateZoomLabel() {
+        let zoom = mapView.camera.zoom
+        zoomLevelLabel.text = String(format: "Zoom: %.1f", zoom)
+    }
+
     private func setupHoleNavigationUI() {
         // Hole info label (center top)
         holeInfoLabel = UILabel()
@@ -148,48 +394,13 @@ class GoogleMapsViewController: UIViewController {
 
         view.addSubview(holeInfoLabel)
 
-        // Previous button
-        previousHoleButton = UIButton(type: .system)
-        previousHoleButton.setTitle("◀ Prev", for: .normal)
-        previousHoleButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
-        previousHoleButton.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.9)
-        previousHoleButton.setTitleColor(.white, for: .normal)
-        previousHoleButton.layer.cornerRadius = 8
-        previousHoleButton.translatesAutoresizingMaskIntoConstraints = false
-        previousHoleButton.addTarget(self, action: #selector(previousHoleTapped), for: .touchUpInside)
-
-        view.addSubview(previousHoleButton)
-
-        // Next button
-        nextHoleButton = UIButton(type: .system)
-        nextHoleButton.setTitle("Next ▶", for: .normal)
-        nextHoleButton.titleLabel?.font = UIFont.systemFont(ofSize: 16, weight: .semibold)
-        nextHoleButton.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.9)
-        nextHoleButton.setTitleColor(.white, for: .normal)
-        nextHoleButton.layer.cornerRadius = 8
-        nextHoleButton.translatesAutoresizingMaskIntoConstraints = false
-        nextHoleButton.addTarget(self, action: #selector(nextHoleTapped), for: .touchUpInside)
-
-        view.addSubview(nextHoleButton)
-
+       
         NSLayoutConstraint.activate([
             // Hole info label at top center
             holeInfoLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             holeInfoLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 100),
             holeInfoLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
             holeInfoLabel.heightAnchor.constraint(equalToConstant: 60),
-
-            // Previous button at bottom left
-            previousHoleButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            previousHoleButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
-            previousHoleButton.widthAnchor.constraint(equalToConstant: 100),
-            previousHoleButton.heightAnchor.constraint(equalToConstant: 50),
-
-            // Next button at bottom right
-            nextHoleButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            nextHoleButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
-            nextHoleButton.widthAnchor.constraint(equalToConstant: 100),
-            nextHoleButton.heightAnchor.constraint(equalToConstant: 50)
         ])
     }
 
@@ -257,10 +468,10 @@ class GoogleMapsViewController: UIViewController {
 
     private func initializeDefaultPoints() {
         // Player 1 (Red) - Start position
-        player1Point = CLLocationCoordinate2D(latitude: 36.57020081124087, longitude: -121.948783993721)
+        player1Point = CLLocationCoordinate2D(latitude: 21.191075361172107, longitude: 72.78558602318863)
 
         // Player 2 (Green) - End position
-        player2Point = CLLocationCoordinate2D(latitude: 36.57068307134521, longitude: -121.94711364805698)
+        player2Point = CLLocationCoordinate2D(latitude: 21.19415203405939, longitude: 72.78658751154329)
 
         // Calculate middle point exactly at center between two players
         let midLat = (player1Point.latitude + player2Point.latitude) / 2.0
@@ -359,27 +570,86 @@ class GoogleMapsViewController: UIViewController {
     }
 
     private func centerMapOnHole() {
-        // Create bounds that include all three points
-        let bounds = GMSCoordinateBounds(coordinate: player1Point, coordinate: player2Point)
-            .includingCoordinate(midPoint)
-
         // Calculate bearing from Player 1 (tee) to Player 2 (green)
         let bearing = calculateBearing(from: player1Point, to: player2Point)
 
-        // Create camera with calculated bearing for auto-rotation
-        let center = CLLocationCoordinate2D(
-            latitude: (player1Point.latitude + player2Point.latitude) / 2,
-            longitude: (player1Point.longitude + player2Point.longitude) / 2
+        // Calculate the distance between player1 and player2 in meters
+        let player1Location = CLLocation(latitude: player1Point.latitude, longitude: player1Point.longitude)
+        let player2Location = CLLocation(latitude: player2Point.latitude, longitude: player2Point.longitude)
+        let distanceInMeters = player1Location.distance(from: player2Location)
+
+        // Calculate zoom level based on distance
+        // Using padding of 200 pixels from top/bottom
+        let availableScreenHeight = view.bounds.height - 260 // 200px top
+
+        // Calculate zoom level that fits the distance in available screen height
+        // Formula: zoom = log2(screenHeight * 156543.03392 / (distance * cos(latitude)))
+        let metersPerPixel = distanceInMeters / availableScreenHeight
+        let latitude = (player1Point.latitude + player2Point.latitude) / 2
+        let zoom = log2(156543.03392 * cos(latitude * .pi / 180) / metersPerPixel)
+
+        // Center point between tee and green
+        let centerLat = (player1Point.latitude + player2Point.latitude) / 2
+        let centerLng = (player1Point.longitude + player2Point.longitude) / 2
+
+        // Adjust center to compensate for leading offset (120 points)
+        // Map visible width is reduced by 120, so shift center slightly left
+        let mapVisibleWidth = view.bounds.width - 120
+        let offsetRatio = 120 / (2 * mapVisibleWidth) // Offset as ratio
+
+        // Convert pixel offset to meters at this zoom level
+        let metersPerPixelAtZoom = 156543.03392 * cos(latitude * .pi / 180) / pow(2, zoom)
+        let offsetMeters = Double(60) * metersPerPixelAtZoom // 60 = half of 120
+
+        // Calculate perpendicular bearing (90 degrees to the left)
+        let perpendicularBearing = (bearing - 90).truncatingRemainder(dividingBy: 360)
+        let bearingRadians = perpendicularBearing * .pi / 180
+
+        // Calculate offset in lat/lng
+        let earthRadius: Double = 6371000
+        let deltaLat = (offsetMeters / earthRadius) * (180 / .pi) * cos(bearingRadians)
+        let deltaLng = (offsetMeters / (earthRadius * cos(latitude * .pi / 180))) * (180 / .pi) * sin(bearingRadians)
+
+        // Apply offset to center
+        let adjustedCenter = CLLocationCoordinate2D(
+            latitude: centerLat + deltaLat,
+            longitude: centerLng + deltaLng
         )
 
+        // Apply camera with calculated zoom and rotation
         let camera = GMSCameraPosition(
-            target: center,
-            zoom: 17,
+            target: adjustedCenter,
+            zoom: Float(zoom),
             bearing: bearing,
             viewingAngle: 0
         )
 
         mapView.animate(to: camera)
+
+        // Set camera bounds to restrict visible area
+        setupCameraBounds()
+    }
+
+    private func setupCameraBounds() {
+        // Create bounds that include both points with some padding
+        let bounds = GMSCoordinateBounds(coordinate: player1Point, coordinate: player2Point)
+
+        // Calculate minimum zoom level to fit both points
+        let player1Location = CLLocation(latitude: player1Point.latitude, longitude: player1Point.longitude)
+        let player2Location = CLLocation(latitude: player2Point.latitude, longitude: player2Point.longitude)
+        let distanceInMeters = player1Location.distance(from: player2Location)
+
+        // Calculate minimum zoom based on screen height and distance
+        let availableScreenHeight = view.bounds.height - 260
+        let metersPerPixel = distanceInMeters / availableScreenHeight
+        let latitude = (player1Point.latitude + player2Point.latitude) / 2
+        let minZoom = log2(156543.03392 * cos(latitude * .pi / 180) / metersPerPixel) - 0.5 // Slightly less for padding
+
+        // Set minimum zoom (can't zoom out beyond this) and maximum zoom (can zoom in more)
+        mapView.setMinZoom(Float(minZoom), maxZoom: 21)
+
+        // Restrict camera to bounds (user can't scroll outside this area)
+        mapView.cameraTargetBounds = bounds
     }
     
 
@@ -399,104 +669,32 @@ class GoogleMapsViewController: UIViewController {
 
         return bearing
     }
-
-    // MARK: - Rotation Controls
-
-//    private func setupRotationControls() {
-//        // Rotate Left button
-//        rotateLeftButton = UIButton(type: .system)
-//        rotateLeftButton.setTitle("↶", for: .normal)
-//        rotateLeftButton.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
-//        rotateLeftButton.backgroundColor = UIColor.systemIndigo.withAlphaComponent(0.9)
-//        rotateLeftButton.setTitleColor(.white, for: .normal)
-//        rotateLeftButton.layer.cornerRadius = 25
-//        rotateLeftButton.translatesAutoresizingMaskIntoConstraints = false
-//        rotateLeftButton.addTarget(self, action: #selector(rotateLeftTapped), for: .touchUpInside)
-//
-//        view.addSubview(rotateLeftButton)
-//
-//        // Rotate Right button
-//        rotateRightButton = UIButton(type: .system)
-//        rotateRightButton.setTitle("↷", for: .normal)
-//        rotateRightButton.titleLabel?.font = UIFont.systemFont(ofSize: 24, weight: .bold)
-//        rotateRightButton.backgroundColor = UIColor.systemIndigo.withAlphaComponent(0.9)
-//        rotateRightButton.setTitleColor(.white, for: .normal)
-//        rotateRightButton.layer.cornerRadius = 25
-//        rotateRightButton.translatesAutoresizingMaskIntoConstraints = false
-//        rotateRightButton.addTarget(self, action: #selector(rotateRightTapped), for: .touchUpInside)
-//
-//        view.addSubview(rotateRightButton)
-//
-//        // Reset North button
-//        resetNorthButton = UIButton(type: .system)
-//        resetNorthButton.setTitle("N", for: .normal)
-//        resetNorthButton.titleLabel?.font = UIFont.systemFont(ofSize: 18, weight: .bold)
-//        resetNorthButton.backgroundColor = UIColor.systemIndigo.withAlphaComponent(0.9)
-//        resetNorthButton.setTitleColor(.white, for: .normal)
-//        resetNorthButton.layer.cornerRadius = 25
-//        resetNorthButton.translatesAutoresizingMaskIntoConstraints = false
-//        resetNorthButton.addTarget(self, action: #selector(resetNorthTapped), for: .touchUpInside)
-//
-//        view.addSubview(resetNorthButton)
-//
-//        NSLayoutConstraint.activate([
-//            // Rotate Left button (left side, middle)
-//            rotateLeftButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-//            rotateLeftButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-//            rotateLeftButton.widthAnchor.constraint(equalToConstant: 50),
-//            rotateLeftButton.heightAnchor.constraint(equalToConstant: 50),
-//
-//            // Rotate Right button (right side, middle)
-//            rotateRightButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-//            rotateRightButton.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-//            rotateRightButton.widthAnchor.constraint(equalToConstant: 50),
-//            rotateRightButton.heightAnchor.constraint(equalToConstant: 50),
-//
-//            // Reset North button (center bottom, above navigation buttons)
-//            resetNorthButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-//            resetNorthButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
-//            resetNorthButton.widthAnchor.constraint(equalToConstant: 50),
-//            resetNorthButton.heightAnchor.constraint(equalToConstant: 50)
-//        ])
-//    }
-//
-//    @objc private func rotateLeftTapped() {
-//        rotateMap(by: -45) // Rotate 45° counter-clockwise
-//    }
-//
-//    @objc private func rotateRightTapped() {
-//        rotateMap(by: 45) // Rotate 45° clockwise
-//    }
-//
-//    @objc private func resetNorthTapped() {
-//        resetMapToNorth() // Reset to 0° (North)
-//    }
-
-    private func rotateMap(by degrees: Double) {
-        let currentBearing = mapView.camera.bearing
-        let newBearing = currentBearing + degrees
-
-        let camera = GMSCameraPosition(
-            target: mapView.camera.target,
-            zoom: mapView.camera.zoom,
-            bearing: newBearing,
-            viewingAngle: mapView.camera.viewingAngle
-        )
-
-        mapView.animate(to: camera)
+    
+    @IBAction func onBack(_ sender: UIButton) {
+        self.navigationController?.popViewController(animated: true)
     }
+    
+    @IBAction func onPrev(_ sender: UIButton) {
+        guard selectedHoleNumber > 1 else {
+            print("Already at first hole")
+            return
+        }
 
-    private func resetMapToNorth() {
-        let camera = GMSCameraPosition(
-            target: mapView.camera.target,
-            zoom: mapView.camera.zoom,
-            bearing: 0, // North
-            viewingAngle: mapView.camera.viewingAngle
-        )
-
-        mapView.animate(to: camera)
+        selectedHoleNumber -= 1
+        loadHoleData()
     }
+    
+    @IBAction func onNext(_ sender: UIButton) {
+        emitUserLocationUpdate(latitude: 2.39, longitude: 56.78)
+        
+        guard selectedHoleNumber < 18 else {
+            print("Already at last hole")
+            return
+        }
 
+        selectedHoleNumber += 1
+        loadHoleData()
+    }
 }
 
 // MARK: - GMSMapViewDelegate
@@ -507,6 +705,10 @@ extension GoogleMapsViewController: GMSMapViewDelegate {
 
     func mapView(_ mapView: GMSMapView, didTapAt coordinate: CLLocationCoordinate2D) {
         // Handle map taps if needed
+    }
+
+    func mapView(_ mapView: GMSMapView, didChange position: GMSCameraPosition) {
+        updateZoomLabel()
     }
 
     // Called when user starts dragging
@@ -545,6 +747,21 @@ extension GoogleMapsViewController: CLLocationManagerDelegate {
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
 
+        // Check if enough time has passed since last location update
+        let currentTime = Date()
+        if let lastUpdate = lastLocationUpdateTime {
+            let timeSinceLastUpdate = currentTime.timeIntervalSince(lastUpdate)
+            if timeSinceLastUpdate < locationUpdateInterval {
+                return // Don't emit too frequently
+            }
+        }
+        
+        // Update the last location update time
+        lastLocationUpdateTime = currentTime
+        
+        // Emit location update via socket
+        emitUserLocationUpdate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
+        
         // Optionally update start point to user's current location
         // Uncomment if you want real-time location tracking
         // startPoint = location.coordinate
@@ -574,30 +791,11 @@ extension GoogleMapsViewController: CLLocationManagerDelegate {
         }
     }
 
-    // MARK: - Hole Navigation
-
-    @objc private func previousHoleTapped() {
-        guard selectedHoleNumber > 1 else {
-            print("Already at first hole")
-            return
-        }
-
-        selectedHoleNumber -= 1
-        loadHoleData()
-    }
-
-    @objc private func nextHoleTapped() {
-        guard selectedHoleNumber < 18 else {
-            print("Already at last hole")
-            return
-        }
-
-        selectedHoleNumber += 1
-        loadHoleData()
-    }
-
     private func loadHoleData() {
         guard let course = selectedCourse else { return }
+
+        // Reset camera bounds first to allow movement
+        mapView.cameraTargetBounds = nil
 
         // Reinitialize points for new hole
         initializePointsFromCourse(course)
@@ -630,10 +828,26 @@ extension GoogleMapsViewController: CLLocationManagerDelegate {
         holeInfoLabel.text = "Hole \(selectedHoleNumber)\nPar \(par) - \(yardage) yards"
 
         // Enable/disable buttons based on hole number
-        previousHoleButton.isEnabled = selectedHoleNumber > 1
-        previousHoleButton.alpha = selectedHoleNumber > 1 ? 1.0 : 0.5
-
-        nextHoleButton.isEnabled = selectedHoleNumber < 18
-        nextHoleButton.alpha = selectedHoleNumber < 18 ? 1.0 : 0.5
+//        previousHoleButton.isEnabled = selectedHoleNumber > 1
+//        previousHoleButton.alpha = selectedHoleNumber > 1 ? 1.0 : 0.5
+//
+//        nextHoleButton.isEnabled = selectedHoleNumber < 18
+//        nextHoleButton.alpha = selectedHoleNumber < 18 ? 1.0 : 0.5
+    }
+}
+extension GoogleMapsViewController: UITableViewDelegate, UITableViewDataSource {
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return golfFeatures.count
+    }
+    
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "InfoTableViewCell", for: indexPath) as! InfoTableViewCell
+        let feature = golfFeatures[indexPath.row]
+        cell.configure(title: feature.title, number: feature.number)
+        return cell
+    }
+    
+    func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        return 70
     }
 }
