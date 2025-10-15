@@ -35,10 +35,9 @@ class GoogleMapsViewController: UIViewController {
     private var polylinePlayer1ToMid: GMSPolyline?
     private var polylinePlayer2ToMid: GMSPolyline?
 
-    // Distance labels
-    private var player1DistanceLabel: UILabel!
-    private var player2DistanceLabel: UILabel!
-    private var zoomLevelLabel: UILabel!
+    // Radius circle around midpoint
+    private var midPointCircle: GMSCircle?
+    private var centerDotMarker: GMSMarker?  // White dot at center
 
     // Hole navigation
     private var holeInfoLabel: UILabel!
@@ -56,9 +55,7 @@ class GoogleMapsViewController: UIViewController {
 
         setupLocationManager()
         setupMapView()
-        setupDistanceLabels()
-        setupZoomLevelLabel()
-        setupHoleNavigationUI()
+       // setupHoleNavigationUI()
        // setupRotationControls()
 
         // Use selected course if available, otherwise use default
@@ -74,7 +71,7 @@ class GoogleMapsViewController: UIViewController {
         setupMarkers()
         drawPolylines()
         updateDistanceLabels()
-        updateHoleInfo()
+      //  updateHoleInfo()
         centerMapOnHole()
         setupSocket()
     }
@@ -313,73 +310,6 @@ class GoogleMapsViewController: UIViewController {
         ])
     }
 
-    private func setupDistanceLabels() {
-        // Player 1 (Red) distance label
-        player1DistanceLabel = UILabel()
-        player1DistanceLabel.backgroundColor = UIColor.systemRed.withAlphaComponent(0.9)
-        player1DistanceLabel.textColor = .white
-        player1DistanceLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
-        player1DistanceLabel.textAlignment = .center
-        player1DistanceLabel.layer.cornerRadius = 8
-        player1DistanceLabel.clipsToBounds = true
-        player1DistanceLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        view.addSubview(player1DistanceLabel)
-
-        NSLayoutConstraint.activate([
-            player1DistanceLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            player1DistanceLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            player1DistanceLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
-            player1DistanceLabel.heightAnchor.constraint(equalToConstant: 50)
-        ])
-
-        // Player 2 (Green) distance label
-        player2DistanceLabel = UILabel()
-        player2DistanceLabel.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.9)
-        player2DistanceLabel.textColor = .white
-        player2DistanceLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
-        player2DistanceLabel.textAlignment = .center
-        player2DistanceLabel.layer.cornerRadius = 8
-        player2DistanceLabel.clipsToBounds = true
-        player2DistanceLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        view.addSubview(player2DistanceLabel)
-
-        NSLayoutConstraint.activate([
-            player2DistanceLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            player2DistanceLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            player2DistanceLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
-            player2DistanceLabel.heightAnchor.constraint(equalToConstant: 50)
-        ])
-    }
-
-    private func setupZoomLevelLabel() {
-        zoomLevelLabel = UILabel()
-        zoomLevelLabel.backgroundColor = UIColor.black.withAlphaComponent(0.8)
-        zoomLevelLabel.textColor = .white
-        zoomLevelLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
-        zoomLevelLabel.textAlignment = .center
-        zoomLevelLabel.layer.cornerRadius = 8
-        zoomLevelLabel.clipsToBounds = true
-        zoomLevelLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        view.addSubview(zoomLevelLabel)
-
-        NSLayoutConstraint.activate([
-            zoomLevelLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            zoomLevelLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
-            zoomLevelLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
-            zoomLevelLabel.heightAnchor.constraint(equalToConstant: 40)
-        ])
-
-        updateZoomLabel()
-    }
-
-    private func updateZoomLabel() {
-        let zoom = mapView.camera.zoom
-        zoomLevelLabel.text = String(format: "Zoom: %.1f", zoom)
-    }
-
     private func setupHoleNavigationUI() {
         // Hole info label (center top)
         holeInfoLabel = UILabel()
@@ -449,10 +379,10 @@ class GoogleMapsViewController: UIViewController {
             longitude: green.lng
         )
 
-        // Calculate middle point dynamically between tee and green
+        // Set midpoint at the second point (Green/Player 2)
         midPoint = CLLocationCoordinate2D(
-            latitude: (player1Point.latitude + player2Point.latitude) / 2,
-            longitude: (player1Point.longitude + player2Point.longitude) / 2
+            latitude: player2Point.latitude,
+            longitude: player2Point.longitude
         )
 
         // Get hole info
@@ -473,15 +403,15 @@ class GoogleMapsViewController: UIViewController {
         // Player 2 (Green) - End position
         player2Point = CLLocationCoordinate2D(latitude: 21.19415203405939, longitude: 72.78658751154329)
 
-        // Calculate middle point exactly at center between two players
-        let midLat = (player1Point.latitude + player2Point.latitude) / 2.0
-        let midLng = (player1Point.longitude + player2Point.longitude) / 2.0
-
-        midPoint = CLLocationCoordinate2D(latitude: midLat, longitude: midLng)
+        // Set midpoint at the second point (Green/Player 2)
+        midPoint = CLLocationCoordinate2D(
+            latitude: player2Point.latitude,
+            longitude: player2Point.longitude
+        )
 
         print("Player 1: \(player1Point.latitude), \(player1Point.longitude)")
         print("Player 2: \(player2Point.latitude), \(player2Point.longitude)")
-        print("Mid Point: \(midLat), \(midLng)")
+        print("Mid Point: \(midPoint.latitude), \(midPoint.longitude)")
     }
 
     private func setupMarkers() {
@@ -531,25 +461,75 @@ class GoogleMapsViewController: UIViewController {
         polylinePlayer1ToMid?.map = nil
         polylinePlayer2ToMid?.map = nil
 
-        // Create path for Player 1 to Mid (Red line)
+        // Create dashed line style: - - - - - -
+        // Need both solid (dash) and transparent (gap) styles
+        let solidStyle = GMSStrokeStyle.solidColor(.white)
+        let transparentStyle = GMSStrokeStyle.solidColor(.clear)
+        let styles = [solidStyle, transparentStyle]
+
+        let dashLength: NSNumber = 3  // Length of each dash
+        let gapLength: NSNumber = 1   // Length of each gap
+        let lengths = [dashLength, gapLength]
+
+        // Create path for Player 1 to Mid (Dashed white line)
         let pathPlayer1ToMid = GMSMutablePath()
         pathPlayer1ToMid.add(player1Point)
         pathPlayer1ToMid.add(midPoint)
 
         polylinePlayer1ToMid = GMSPolyline(path: pathPlayer1ToMid)
-        polylinePlayer1ToMid?.strokeColor = UIColor.systemRed
-        polylinePlayer1ToMid?.strokeWidth = 5
+        polylinePlayer1ToMid?.strokeWidth = 3
+        polylinePlayer1ToMid?.spans = GMSStyleSpans(pathPlayer1ToMid, styles, lengths, .rhumb)
         polylinePlayer1ToMid?.map = mapView
 
-        // Create path for Player 2 to Mid (Green line)
+        // Create path for Player 2 to Mid (Dashed white line)
         let pathPlayer2ToMid = GMSMutablePath()
         pathPlayer2ToMid.add(player2Point)
         pathPlayer2ToMid.add(midPoint)
 
         polylinePlayer2ToMid = GMSPolyline(path: pathPlayer2ToMid)
-        polylinePlayer2ToMid?.strokeColor = UIColor.systemGreen
-        polylinePlayer2ToMid?.strokeWidth = 5
+        polylinePlayer2ToMid?.strokeWidth = 3
+        polylinePlayer2ToMid?.spans = GMSStyleSpans(pathPlayer2ToMid, styles, lengths, .rhumb)
         polylinePlayer2ToMid?.map = mapView
+
+        // Draw 10-meter radius circle around midpoint
+        drawMidPointCircle()
+    }
+
+    private func drawMidPointCircle() {
+        // Remove existing circle and center dot
+        midPointCircle?.map = nil
+        centerDotMarker?.map = nil
+
+        // Create a 15-meter radius circle around the midpoint
+        midPointCircle = GMSCircle(position: midPoint, radius: 15.0)  // 15 meters
+        midPointCircle?.fillColor = UIColor.systemBlue.withAlphaComponent(0.15)  // Light blue fill
+        midPointCircle?.strokeColor = UIColor.systemBlue  // Blue border
+        midPointCircle?.strokeWidth = 1
+        midPointCircle?.map = mapView
+
+        // Add white dot at the center of the circle
+        centerDotMarker = GMSMarker(position: midPoint)
+        centerDotMarker?.icon = createCenterDotIcon()
+        centerDotMarker?.groundAnchor = CGPoint(x: 0.5, y: 0.5)  // Center the icon
+        centerDotMarker?.map = mapView
+    }
+
+    private func createCenterDotIcon() -> UIImage? {
+        let size = CGSize(width: 16, height: 16)
+
+        UIGraphicsBeginImageContextWithOptions(size, false, 0)
+        guard let context = UIGraphicsGetCurrentContext() else { return nil }
+
+        // Draw white filled circle
+        let circleRect = CGRect(x: 2, y: 2, width: 12, height: 12)
+        context.setFillColor(UIColor.white.cgColor)
+        context.addEllipse(in: circleRect)
+        context.fillPath()
+
+        let image = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+
+        return image
     }
 
     private func updateDistanceLabels() {
@@ -560,13 +540,14 @@ class GoogleMapsViewController: UIViewController {
         let distancePlayer1ToMid = player1Location.distance(from: midLocation)
         let distancePlayer2ToMid = player2Location.distance(from: midLocation)
 
-        // Display Player 1 distance (Red)
-        player1DistanceLabel.text = String(format: "Player 1\n%.0f m", distancePlayer1ToMid)
-        player1DistanceLabel.numberOfLines = 2
+        // Update the first two items in the golf features array
+        if golfFeatures.count >= 2 {
+            golfFeatures[0] = GolfCourseFeature(title: "Player 1", number: String(format: "%.0f m", distancePlayer1ToMid))
+            golfFeatures[1] = GolfCourseFeature(title: "Player 2", number: String(format: "%.0f m", distancePlayer2ToMid))
 
-        // Display Player 2 distance (Green)
-        player2DistanceLabel.text = String(format: "Player 2\n%.0f m", distancePlayer2ToMid)
-        player2DistanceLabel.numberOfLines = 2
+            // Reload only the first two rows for efficiency
+            infoTableView.reloadRows(at: [IndexPath(row: 0, section: 0), IndexPath(row: 1, section: 0)], with: .none)
+        }
     }
 
     private func centerMapOnHole() {
@@ -708,7 +689,7 @@ extension GoogleMapsViewController: GMSMapViewDelegate {
     }
 
     func mapView(_ mapView: GMSMapView, didChange position: GMSCameraPosition) {
-        updateZoomLabel()
+        // Camera position changed
     }
 
     // Called when user starts dragging
@@ -800,12 +781,14 @@ extension GoogleMapsViewController: CLLocationManagerDelegate {
         // Reinitialize points for new hole
         initializePointsFromCourse(course)
 
-        // Clear existing markers and polylines
+        // Clear existing markers, polylines, circle, and center dot
         player1Marker?.map = nil
         player2Marker?.map = nil
         midMarker?.map = nil
         polylinePlayer1ToMid?.map = nil
         polylinePlayer2ToMid?.map = nil
+        midPointCircle?.map = nil
+        centerDotMarker?.map = nil
 
         // Recreate everything for new hole
         setupMarkers()
@@ -843,7 +826,16 @@ extension GoogleMapsViewController: UITableViewDelegate, UITableViewDataSource {
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "InfoTableViewCell", for: indexPath) as! InfoTableViewCell
         let feature = golfFeatures[indexPath.row]
-        cell.configure(title: feature.title, number: feature.number)
+
+        // Set custom colors for Player 1 (red) and Player 2 (green)
+        if indexPath.row == 0 {
+            cell.configure(title: feature.title, number: feature.number, textColor: .systemRed)
+        } else if indexPath.row == 1 {
+            cell.configure(title: feature.title, number: feature.number, textColor: .systemGreen)
+        } else {
+            cell.configure(title: feature.title, number: feature.number)
+        }
+
         return cell
     }
     

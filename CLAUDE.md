@@ -8,50 +8,67 @@ This is an iOS golf course visualization application built with UIKit. The app p
 
 ## Architecture
 
-- **Platform**: iOS (minimum deployment target: iOS 18.4)
+- **Platform**: iOS (minimum deployment target: iOS 15.0)
 - **Language**: Swift 5.0
-- **UI Framework**: UIKit (no SwiftUI)
+- **UI Framework**: UIKit with Storyboards (no SwiftUI)
 - **Architecture**: MVC pattern with delegate protocols for view communication
-- **Bundle ID**: test.golf-demo
-- **Navigation**: Programmatic UI (no storyboard segues for main flow)
+- **Bundle ID**: com.forcegolf.iroid.app
+- **Dependency Management**: CocoaPods
+- **Navigation**: Mixed - Storyboard-based with programmatic transitions
 
 ### Core Architecture Components
 
 **Data Layer:**
 - `Models.swift` - Core data structures (`LatLng`, `Target`, `Shot`, `GeoCalibration`) and coordinate transformation
 - `GolfCourseAPIService.swift` - API client with comprehensive data models (`GolfCourse`, `TeeBox`, `Hole`)
+- `Model/` - Request/response models for API communication
+- `ApiManager/` - Centralized networking with service wrappers
 
 **View Layer:**
-- `FairwayMapView.swift` - Custom UIView with gesture handling, rendering, and coordinate mapping
+- `FairwayMapView.swift` - Custom UIView with 2D golf course rendering and gesture handling
 - `FairwayMapView+Gestures.swift` - Pan, zoom, tap gesture implementations
+- `GoogleMapsViewController.swift` - Google Maps integration with real-time location tracking
 - `GolfCourseListViewController.swift` - Course selection with search and API integration
-- `GolfCourseTableViewCell.swift` - Custom cells for course display
+- `Auth/` - Login and sign-up screens
 
 **Business Logic:**
 - `CourseRenderer.swift` - Dynamic golf hole rendering based on par and yardage data
 - `ViewController.swift` - Course detail view with interactive map controls
+- `SocketIOManager.swift` - Real-time location updates via Socket.IO
+- `Library/` - Shared utilities, extensions, and UI components
 
 ## Development Commands
 
+### Dependencies
+```bash
+# Install CocoaPods dependencies (required before first build)
+pod install
+
+# Update dependencies
+pod update
+```
+
 ### Building
 ```bash
-# Build for Debug configuration
-xcodebuild -project golf-demo.xcodeproj -scheme golf-demo -configuration Debug build
+# IMPORTANT: Always use .xcworkspace, not .xcodeproj (CocoaPods requirement)
 
-# Build for Release configuration  
-xcodebuild -project golf-demo.xcodeproj -scheme golf-demo -configuration Release build
+# Build for Debug configuration
+xcodebuild -workspace golf-demo.xcworkspace -scheme golf-demo -configuration Debug build
+
+# Build for Release configuration
+xcodebuild -workspace golf-demo.xcworkspace -scheme golf-demo -configuration Release build
 
 # Clean build folder
-xcodebuild -project golf-demo.xcodeproj -scheme golf-demo clean
+xcodebuild -workspace golf-demo.xcworkspace -scheme golf-demo clean
 ```
 
 ### Running
 ```bash
 # Build and run in iOS Simulator (iPhone 15 recommended for testing)
-xcodebuild -project golf-demo.xcodeproj -scheme golf-demo -destination 'platform=iOS Simulator,name=iPhone 15' build
+xcodebuild -workspace golf-demo.xcworkspace -scheme golf-demo -destination 'platform=iOS Simulator,name=iPhone 15' build
 
 # For development with Xcode:
-open golf-demo.xcodeproj
+open golf-demo.xcworkspace  # NOT golf-demo.xcodeproj
 ```
 
 ### Testing
@@ -59,111 +76,124 @@ No test targets configured. API testing available through in-app "Test API" butt
 
 ## Key Technical Patterns
 
-### Coordinate System Architecture
-- **GPS ↔ Pixel Transformation**: `GeoCalibration` class handles lat/lng to screen coordinate mapping using `CGAffineTransform`
-- **Multi-transform Pipeline**: `imageFitTransform` → `userTransform` → `rotationTransform` for complex view transformations
-- **Distance Calculations**: Implements haversine formula through `CLLocation.yardsBetween()` extension
+### Dual Map System
+The app uses **two different map implementations**:
 
-### Custom View Pattern
-- `FairwayMapView`: Core UIView subclass handling rendering, gestures, and coordinate mapping
-- Delegate protocol `FairwayMapViewDelegate` for event communication
-- Gesture recognizers: pan, pinch, tap, double-tap with animation support
+1. **2D Custom Rendering** (`FairwayMapView.swift`)
+   - Custom UIView with GPS ↔ pixel transformation via `GeoCalibration`
+   - Multi-transform pipeline: `imageFitTransform` → `userTransform` → `rotationTransform`
+   - Fallback: API → OpenStreetMap tiles → rendered course graphics
+   - Used in `ViewController.swift` for course detail view
+
+2. **Google Maps Integration** (`GoogleMapsViewController.swift`)
+   - Real-time location tracking with `CLLocationManager`
+   - Socket.IO for multi-user location sharing
+   - Dynamic polyline drawing between players
+   - Auto-rotation based on hole bearing (tee → green)
+   - Distance calculations between multiple points
+
+### Real-Time Features
+- **Socket.IO Integration**: Live location updates emitted every 5 seconds
+- **Multi-user Tracking**: Dictionary-based marker management for other users
+- **Event System**: `SocketHelper.Events.updateUserLocation` for pub/sub pattern
+- **Throttled Updates**: Location updates limited by `locationUpdateInterval`
 
 ### API Integration Pattern
-- Async completion handlers for network calls
-- Fallback mechanism: API → OpenStreetMap tiles → rendered course graphics
-- Real-time tile downloading and combination for ground imagery
+- **AlamofireObjectMapper**: JSON → Swift model mapping
+- **Completion handlers**: Async network calls with success/failure callbacks
+- **Golf Course API**: Real course data with tee boxes, holes, and GPS coordinates
+- **Backend Services**: `ApiManager/` with modular service structure
 
-## Golf Map Implementation
+## App Flow & Features
 
-### Files Added:
-- `Models.swift` - Core data structures for golf course data
-- `FairwayMapView.swift` - Main 2D golf map view implementation
-- `FairwayMapView+Gestures.swift` - Gesture handling for pan/zoom/tap
-- `GolfCourseAPIService.swift` - Golf Course API integration and sample data
-- `CourseRenderer.swift` - Dynamic golf course rendering engine
-- `GolfCourseListViewController.swift` - Course selection screen
-- `GolfCourseTableViewCell.swift` - Custom cells for course display
+### Navigation Structure
+```
+AppDelegate.swift (Initial setup)
+    ↓
+ViewController.swift (2D Custom Map View)
+    ↓
+GolfCourseListViewController.swift (Course Selection)
+    ↓
+GoogleMapsViewController.swift (Real-time Google Maps with multi-user tracking)
+```
 
-### App Flow 📱
+### Screen Details
 
-**1. Golf Course List Screen (First Screen)**
-- **Loads REAL golf courses from API on app launch** 🎯
-- Automatically searches for popular courses: "pebble beach", "augusta national", "st andrews", "torrey pines"
-- Professional course cards showing course name, club name, location, and basic stats from real API data
-- Search functionality adds more courses from Golf Course API (WYQ4EBPXAB25BH3X2B5ZJ5Z3U4)
-- Fallback to sample courses only if API completely fails
-- Loading indicators and error handling for API calls
-- Refresh button to reload real courses from API
-- Tap any course to navigate to detailed golf course view
+**1. Course List Screen** (`GolfCourseListViewController`)
+- Auto-loads popular courses: "pebble beach", "augusta national", "st andrews", "torrey pines"
+- Search functionality via Golf Course API (key: `WYQ4EBPXAB25BH3X2B5ZJ5Z3U4`)
+- Custom `GolfCourseTableViewCell` with course details
+- Fallback to sample courses if API fails
+- Navigates to either custom 2D view or Google Maps view
 
-**2. Golf Course Detail Screen**
-- Shows rendered golf course ground based on selected course data
-- Interactive 2D map with pan/zoom/gesture controls
-- Player and pin locations with GPS coordinates
-- Distance measurements and target overlays
-- Course-specific rendering with Par 3/4/5 hole layouts
+**2. Custom 2D Map View** (`ViewController` + `FairwayMapView`)
+- Rendered golf course with custom drawing
+- Par 3/4/5 hole layouts via `CourseRenderer`
+- GPS coordinate transformation and distance measurements
+- Touch gestures: pan, zoom, tap, double-tap
 
-### Key Features:
-- **Course Selection Flow**: Professional course list → detailed course view
-- **Dynamic Course Rendering**: Realistic golf hole layouts based on API data
-- **2D Golf Hole Visualization**: Different layouts for Par 3, 4, and 5 holes
-- **GPS Coordinate Transformation**: lat/lng ↔ pixels with accurate mapping
-- **Interactive Elements**: player position, pin placement, targets with touch controls
-- **Multi-touch Gestures**: pan, zoom, tap, double-tap with animation
-- **Distance Calculations**: Real-time yardage display and measurements
-- **Golf Course API Integration**: Live search with key WYQ4EBPXAB25BH3X2B5ZJ5Z3U4
+**3. Google Maps View** (`GoogleMapsViewController`)
+- **Real-time location tracking** with `CLLocationManager`
+- **Multi-user support** via Socket.IO (emits location every 5 seconds)
+- **Dynamic polylines** between two players and midpoint
+- **Draggable midpoint marker** with live distance updates
+- **Auto-rotation** to align tee → green vertically on screen
+- **Hole navigation** with Previous/Next buttons
+- **Distance labels** showing meters from each player to midpoint
+- **Zoom level display** and camera bounds restriction
 
-### Demo Controls (Course Detail Screen):
-- Player: Center on player location
-- Green: Zoom to green with animation
-- Overlays: Toggle overlay visibility  
-- Pin Mode: Enable/disable pin editing
-- Test API: Live API testing with real course search
-- Sample Course: Load rendered demonstration course
+## Dependencies (from Podfile)
 
-The implementation replicates GolfLogix's FairwayImageView functionality with a modern iOS course selection flow.
+- **AlamofireObjectMapper** (~> 5.2): Networking with JSON mapping
+- **NotificationBannerSwift**: In-app notification UI
+- **lottie-ios**: Animation support
+- **Socket.IO-Client-Swift** (~> 16.1.1): Real-time WebSocket communication
+- **IQKeyboardManagerSwift**: Automatic keyboard handling
+- **GoogleMaps**: Integrated via Info.plist key `GMSApiKey`
 
-## API Integration Status - Updated
+## API Integration
 
-### Current Implementation:
+### Golf Course API
 - **Endpoint**: `https://api.golfcourseapi.com/v1/search`
-- **Authentication**: Header-based with `Authorization: Key <api_key>`
-- **Data Models**: Full OpenAPI spec compliance with proper Codable support
-- **Parameters**: Uses `search_query` parameter as per OpenAPI specification
-- **Response Parsing**: Complete data structures for courses, tee boxes, and holes
+- **Authentication**: Header `Authorization: Key WYQ4EBPXAB25BH3X2B5ZJ5Z3U4`
+- **Models**: `GolfCourse`, `TeeBox`, `Hole` (Codable-based)
+- **Service**: `GolfCourseAPIService.swift` with completion handlers
+- **Static Data**: `PebbleBeachStaticData.swift` for demo GPS coordinates
 
-### API Features:
-- Search courses by name/club name
-- Get detailed course information with tee box data
-- Proper error handling and debug logging
-- Real course data integration with map visualization
-- Test button for immediate API validation
-
-### Demo Controls Updated:
-- Player: Center on player location
-- Green: Zoom to green with animation
-- Overlays: Toggle overlay visibility  
-- Pin Mode: Enable/disable pin editing
-- **Test API**: Live API testing with real course search
+### Backend API
+- **Base URL**: Configured in `WebServicesUrls.swift`
+- **Services**: `LogInServices.swift` for authentication
+- **Request/Response**: Models in `Model/` directory
+- **Manager**: `ApiManager.swift` with AlamofireObjectMapper integration
 
 ## Development Guidelines
 
-### When Adding Features:
-- Follow MVC pattern with delegate protocols for view communication
-- Use completion handlers for async operations (API calls, image downloads)
-- Implement coordinate transformations through `GeoCalibration` for GPS accuracy
-- Add gesture support through dedicated gesture recognizer methods
-- Follow the fallback pattern: API → alternative data → rendered graphics
+### Project Setup
+1. **Always use workspace**: `open golf-demo.xcworkspace` (NOT .xcodeproj)
+2. **Install pods first**: Run `pod install` before building
+3. **Google Maps API Key**: Configured in Info.plist as `GMSApiKey`
+4. **Socket.IO**: Configure endpoint in `SocketIOManager.swift`
 
-### When Debugging:
-- Use "Test API" button for immediate API validation
-- Check Xcode console for detailed API request/response logging
-- GPS coordinates logged with 6 decimal precision
-- All transformations logged with matrix values
+### When Adding Features
+- **MVC Pattern**: ViewControllers manage views, Models handle data, delegate protocols for communication
+- **Async Operations**: Use completion handlers for network calls and location updates
+- **Extensions**: Extensive UIKit extensions in `Library/Extension/` - check before duplicating
+- **Reusability**: Shared utilities in `Library/Utility.swift` and `Constant.swift`
+- **Location Updates**: Throttle with `locationUpdateInterval` to avoid excessive Socket.IO traffic
 
-### API Key Management:
-The Golf Course API key `WYQ4EBPXAB25BH3X2B5ZJ5Z3U4` is embedded in `GolfCourseAPIService.swift`. For production:
-1. Move to secure keychain storage
-2. Verify key activation on golfcourseapi.com
-3. Monitor quota usage through API dashboard
+### Real-Time Features
+- **Socket Events**: Define in `SocketHelper.Events` enum for type-safety
+- **User Tracking**: Use dictionary-based marker management (see `GoogleMapsViewController:168`)
+- **Connection Lifecycle**: Always disconnect socket in `viewWillDisappear`
+- **Error Handling**: Check `SocketHelper.shared.checkConnection()` before emitting
+
+### Debugging
+- **Location**: GPS coordinates logged with precision (see `GoogleMapsViewController:463-466`)
+- **Socket.IO**: Extensive logging with emoji indicators (✅ ❌ 📍 🔄 📡)
+- **API Calls**: Enable debug logging in `ApiManager` and `GolfCourseAPIService`
+- **Transformations**: Matrix values logged for coordinate transformations
+
+### Important Notes
+- **Two Map Systems**: Don't confuse `FairwayMapView` (custom 2D) with `GoogleMapsViewController` (Google Maps SDK)
+- **Authentication**: Login screens exist but may not be enforced on app launch
+- **Static Data**: `PebbleBeachStaticData.swift` provides fallback GPS coordinates for 18 holes

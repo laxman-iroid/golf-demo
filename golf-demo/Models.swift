@@ -129,8 +129,8 @@ struct GolfCourseFeature {
 class GolfCourseFeatureData {
     static func getHoleFeatures() -> [GolfCourseFeature] {
         return [
-            GolfCourseFeature(title: "Green", number: "1"),
-            GolfCourseFeature(title: "Green Bunker", number: "2"),
+            GolfCourseFeature(title: "Player 1", number: "0 m"),
+            GolfCourseFeature(title: "Player 2", number: "0 m"),
             GolfCourseFeature(title: "Fairway Bunker", number: "3"),
             GolfCourseFeature(title: "Water", number: "4"),
             GolfCourseFeature(title: "Trees", number: "5"),

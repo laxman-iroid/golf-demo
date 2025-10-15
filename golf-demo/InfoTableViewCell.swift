@@ -30,8 +30,17 @@ class InfoTableViewCell: UITableViewCell {
         numberLabel.textColor = .black
     }
     
-    func configure(title: String, number: String) {
+    func configure(title: String, number: String, textColor: UIColor? = nil) {
         titleLabel.text = title
         numberLabel.text = number
+
+        // Apply custom color if provided, otherwise use default black
+        if let color = textColor {
+            titleLabel.textColor = color
+            numberLabel.textColor = color
+        } else {
+            titleLabel.textColor = .black
+            numberLabel.textColor = .black
+        }
     }
 }
