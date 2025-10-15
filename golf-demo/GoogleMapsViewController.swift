@@ -681,7 +681,27 @@ class GoogleMapsViewController: UIViewController {
 // MARK: - GMSMapViewDelegate
 extension GoogleMapsViewController: GMSMapViewDelegate {
     func mapView(_ mapView: GMSMapView, didTap marker: GMSMarker) -> Bool {
-        return false
+        // Check if the tapped marker is one of the other user markers
+        for (userId, userMarker) in userMarkers {
+            if marker == userMarker {
+                // Move the midpoint to this user's location
+                midPoint = marker.position
+                midMarker?.position = midPoint
+
+                // Redraw polylines and update distances
+                drawPolylines()
+                updateDistanceLabels()
+
+                print("📍 Midpoint moved to user \(userId)'s location: \(midPoint.latitude), \(midPoint.longitude)")
+
+                // Show marker info window
+                mapView.selectedMarker = marker
+
+                return true // Consume the tap event
+            }
+        }
+
+        return false // Let other markers handle tap normally
     }
 
     func mapView(_ mapView: GMSMapView, didTapAt coordinate: CLLocationCoordinate2D) {
